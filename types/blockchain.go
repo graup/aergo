@@ -11,6 +11,7 @@ import (
 	"io"
 	"math/big"
 	"reflect"
+	"runtime"
 
 	"github.com/aergoio/aergo/internal/enc"
 	"github.com/aergoio/aergo/internal/merkle"
@@ -24,10 +25,9 @@ const (
 	DefaultMaxBlockSize = 1 << 20
 	DefaultCoinbaseFee  = 1
 	lastFieldOfBH       = "Sign"
-
-	//DefaultVerifierCnt = runtime.NumCPU()
-	DefaultVerifierCnt = 1
 )
+
+var DefaultVerifierCnt = runtime.NumCPU()
 
 //MaxAER is maximum value of aergo
 var MaxAER *big.Int

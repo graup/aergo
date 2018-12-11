@@ -97,11 +97,11 @@ func TestInvalidTransactions(t *testing.T) {
 
 	txslice = append(txslice, tx)
 
-	failed, errors := verifier.VerifyTxs(&types.TxList{Txs: txslice})
+	success, errors := verifier.VerifyTxs(&types.TxList{Txs: txslice})
 
-	assert.Equal(t, failed, true)
+	assert.Equal(t, success, false)
 
-	if failed {
+	if !success {
 		for i, error := range errors {
 			if error != nil {
 				assert.Equal(t, i, 0)
