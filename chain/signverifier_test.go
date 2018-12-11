@@ -130,8 +130,9 @@ func TestVerifyValidTxs(t *testing.T) {
 	}
 }
 
-func BenchmarkVerify10000tx(b *testing.B) {
+func BenchmarkParallelVerify10000tx(b *testing.B) {
 	b.Log("BenchmarkVerify10000tx")
+	//beforeTest(10000)
 	beforeTest(10000)
 	defer afterTest()
 

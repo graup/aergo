@@ -147,24 +147,26 @@ func (sv *SignVerifier) VerifyTxs(txlist *types.TxList) (bool, []error) {
 	//logger.Debug().Int("txlen", txLen).Msg("verify tx start")
 
 	//split txlists to worker count
-	workSize := int(math.Ceil(float64(txLen) / float64(sv.workerCnt)))
+	//workSize := int(math.Ceil(float64(txLen) / float64(sv.workerCnt)))
+	dfltMaxWork := 10
+	workSize := int(math.Min(float64(txLen), float64(dfltMaxWork)))
 	workCount := int(math.Ceil(float64(txLen) / float64(workSize)))
 	logger.Debug().Int("worksize", workSize).Int("workcount", workCount).Int("txlen", txLen).Msg("push tx start")
 
 	go func() {
-		from := 0
-		to := 0
-		for i := 0; i < sv.workerCnt && from < txLen; i++ {
+		var to, i = 0, 0
+
+		for from := 0; from < txLen; from = to {
 			if from+workSize <= txLen {
 				to = from + workSize
 			} else {
 				to = txLen
 			}
 
-			logger.Debug().Int("from", from).Int("to", to).Msg("push tx start")
+			//logger.Debug().Int("from", from).Int("to", to).Msg("push tx start")
 			sv.workChs[i] <- verifyWork{idx: i, txs: txs[from:to]}
 
-			from = to
+			i = (i + 1) % sv.workerCnt
 		}
 	}()
 
@@ -192,7 +194,7 @@ LOOP:
 
 			sv.hitMempool += result.hit
 
-			logger.Debug().Int("worker", result.work.idx).Int64("elap", result.elapsed.Nanoseconds()).Msg("worker done")
+			//logger.Debug().Int("worker", result.work.idx).Int64("elap", result.elapsed.Nanoseconds()).Msg("worker done")
 			if doneCnt == workCount {
 				break LOOP
 			}
