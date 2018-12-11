@@ -8,6 +8,7 @@ package dpos
 import (
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/aergoio/aergo-lib/log"
@@ -69,10 +70,50 @@ type DPoS struct {
 	ca   types.ChainAccessor
 }
 
+type bpTimer struct {
+	value int64
+	corr  int64
+}
+
+func newTimeLeft(t, minTxTime int64) *bpTimer {
+	return &bpTimer{
+		value: t,
+		corr:  minTxTime,
+	}
+}
+
+func (t *bpTimer) get() int64 {
+	return atomic.LoadInt64(&t.value)
+}
+
+func (t *bpTimer) sub(delta int64) int64 {
+	return atomic.AddInt64(&t.value, -delta)
+}
+
+func (t *bpTimer) makeCorrection() int64 {
+	// t.corr is a correction like signature validation time. Signature
+	// validation time should be considered when the block execution time is
+	// estimated since the block factory does not check tx signature (it is
+	// done by the mempool so unnecessary).
+	return atomic.AddInt64(&t.value, -t.corr)
+}
+
+func (t *bpTimer) isReasonable() bool {
+	return atomic.LoadInt64(&t.value) > t.corr
+}
+
 // Status shows DPoS consensus's current status
 type bpInfo struct {
 	bestBlock *types.Block
 	slot      *slot.Slot
+	timeLeft  *bpTimer
+}
+
+func (bi *bpInfo) setTimeLeft() {
+	bi.timeLeft = newTimeLeft(
+		bi.slot.GetBpTimeout()*int64(time.Millisecond),
+		slot.MinTxTime(),
+	)
 }
 
 // New returns a new DPos object

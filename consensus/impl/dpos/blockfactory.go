@@ -38,6 +38,19 @@ func newTxExec(blockNo types.BlockNo, ts int64) chain.TxOp {
 	}
 }
 
+// newTxTimeCorr make correction(s) to the remaining block execution time
+// for more reliable execution time measurement.
+func newTxTimeCorr(t *bpTimer) chain.TxOp {
+	return &txExec{
+		execTx: func(bState *state.BlockState, tx *types.Tx) error {
+			t.makeCorrection()
+			// TODO: Finalize block immediately when *t <= 0 by returning
+			// error, here?
+			return nil
+		},
+	}
+}
+
 func (te *txExec) Apply(bState *state.BlockState, tx *types.Tx) error {
 	err := te.execTx(bState, tx)
 	return err
@@ -49,6 +62,7 @@ type BlockFactory struct {
 	jobQueue         chan interface{}
 	workerQueue      chan *bpInfo
 	bpTimeoutC       chan interface{}
+	remainingTime    int64
 	quit             <-chan interface{}
 	maxBlockBodySize uint32
 	ID               string
@@ -113,6 +127,8 @@ func (bf *BlockFactory) controller() {
 			return chain.ErrTimeout{Kind: "slot", Timeout: timeLeft}
 		}
 
+		bpi.setTimeLeft()
+
 		select {
 		case bf.workerQueue <- bpi:
 		default:
@@ -124,9 +140,22 @@ func (bf *BlockFactory) controller() {
 	}
 
 	notifyBpTimeout := func(bpi *bpInfo) {
-		timeout := bpi.slot.GetBpTimeout()
-		time.Sleep(time.Duration(timeout) * time.Millisecond)
-		// TODO: skip when the triggered block has already been genearted!
+		var (
+			timeout = bpi.slot.GetBpTimeout()
+			delta   = 10 * int64(time.Millisecond)
+		)
+
+		for bpi.timeLeft.get() > delta {
+			time.AfterFunc(time.Duration(delta),
+				func() {
+					bpi.timeLeft.sub(delta)
+				},
+			)
+			if !bpi.timeLeft.isReasonable() {
+				break
+			}
+		}
+
 		bf.bpTimeoutC <- struct{}{}
 		logger.Debug().Int64("timeout", timeout).Msg("block production timeout signaled")
 	}
@@ -207,6 +236,7 @@ func (bf *BlockFactory) generateBlock(bpi *bpInfo, lpbNo types.BlockNo) (*types.
 	txOp := chain.NewCompTxOp(
 		bf.txOp,
 		newTxExec(bpi.bestBlock.GetHeader().GetBlockNo()+1, ts),
+		newTxTimeCorr(bpi.timeLeft),
 	)
 
 	block, err := chain.GenerateBlock(bf, bpi.bestBlock, blockState, txOp, ts)

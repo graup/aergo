@@ -31,6 +31,12 @@ func Init(blockIntervalSec int64, bps uint16) {
 	blockProducers = bps
 }
 
+// MinTxTime returns the minimum time required for tx execution.
+func MinTxTime() int64 {
+	// TODO: Get the value from tx validator later.
+	return 100 * int64(time.Microsecond)
+}
+
 // Now returns a Slot corresponding to the current local time.
 func Now() *Slot {
 	return Time(time.Now())
