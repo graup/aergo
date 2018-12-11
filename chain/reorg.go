@@ -211,7 +211,7 @@ func (reorg *reorganizer) dumpOldBlocks() {
 	}
 }
 
-// Find branch root and gather rollforard/rollback target blocks
+// Find branch root and gather rollforard/rollback target Blocks
 func (reorg *reorganizer) gatherChainInfo() error {
 	//find branch root block , gather rollforward Target block
 	var err error

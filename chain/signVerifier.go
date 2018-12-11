@@ -4,13 +4,22 @@ import (
 	"errors"
 	"github.com/aergoio/aergo/account/key"
 	"github.com/aergoio/aergo/internal/enc"
+	"github.com/aergoio/aergo/message"
+	"github.com/aergoio/aergo/pkg/component"
 	"github.com/aergoio/aergo/types"
+	"time"
 )
 
 type SignVerifier struct {
+	comm component.IComponentRequester
+
 	workerCnt int
 	workCh    chan verifyWork
 	doneCh    chan VerifyResult
+
+	checkMempool bool
+
+	hitMempool int
 }
 
 type verifyWork struct {
@@ -21,19 +30,22 @@ type verifyWork struct {
 type VerifyResult struct {
 	work *verifyWork
 	err  error
+	hit  bool
 }
 
 var (
 	ErrTxFormatInvalid = errors.New("tx invalid format")
-
+	dfltUseMempool     = true
 	//logger = log.NewLogger("signverifier")
 )
 
-func NewSignVerifier(workerCnt int) *SignVerifier {
+func NewSignVerifier(comm component.IComponentRequester, workerCnt int, checkMempool bool) *SignVerifier {
 	sv := &SignVerifier{
-		workerCnt: workerCnt,
-		workCh:    make(chan verifyWork, workerCnt),
-		doneCh:    make(chan VerifyResult, workerCnt),
+		comm:         comm,
+		workerCnt:    workerCnt,
+		workCh:       make(chan verifyWork, workerCnt),
+		doneCh:       make(chan VerifyResult, workerCnt),
+		checkMempool: checkMempool,
 	}
 
 	for i := 0; i < workerCnt; i++ {
@@ -53,33 +65,47 @@ func (sv *SignVerifier) verifyTxLoop(workerNo int) {
 
 	for txWork := range sv.workCh {
 		//logger.Debug().Int("worker", workerNo).Int("idx", txWork.idx).Msg("get work to verify tx")
-		err := verifyTx(txWork.tx)
+		hit, err := sv.verifyTx(sv.comm, txWork.tx)
 
 		if err != nil {
-			logger.Error().Int("worker", workerNo).Str("hash", enc.ToString(txWork.tx.GetHash())).
+			logger.Error().Int("worker", workerNo).Bool("hitmempoo", hit).Str("hash", enc.ToString(txWork.tx.GetHash())).
 				Err(err).Msg("error verify tx")
 		}
 
-		sv.doneCh <- VerifyResult{work: &txWork, err: err}
+		sv.doneCh <- VerifyResult{work: &txWork, err: err, hit: hit}
 	}
 
 	logger.Debug().Int("worker", workerNo).Msg("verify worker stop")
 
 }
 
-func verifyTx(tx *types.Tx) error {
+func (sv *SignVerifier) verifyTx(comm component.IComponentRequester, tx *types.Tx) (hitMempool bool, err error) {
+	if sv.checkMempool {
+		result, err := comm.RequestToFutureResult(message.MemPoolSvc, &message.MemPoolExist{Hash: tx.GetHash()}, time.Second,
+			"chain/signverifier/verifytx")
+		if err != nil {
+			logger.Error().Err(err).Msg("failed to get verify from mempool")
+			return false, err
+		}
+
+		msg := result.(*message.MemPoolExistRsp)
+		if msg.Tx != nil {
+			return true, nil
+		}
+	}
+
 	account := tx.GetBody().GetAccount()
 	if account == nil {
-		return ErrTxFormatInvalid
+		return false, ErrTxFormatInvalid
 	}
 
-	err := key.VerifyTx(tx)
+	err = key.VerifyTx(tx)
 
 	if err != nil {
-		return err
+		return false, err
 	}
 
-	return nil
+	return false, nil
 }
 
 func (sv *SignVerifier) VerifyTxs(txlist *types.TxList) (bool, []error) {
@@ -103,6 +129,7 @@ func (sv *SignVerifier) VerifyTxs(txlist *types.TxList) (bool, []error) {
 
 	var doneCnt = 0
 	failed := false
+	sv.hitMempool = 0
 
 LOOP:
 	for {
@@ -122,6 +149,8 @@ LOOP:
 				logger.Error().Err(result.err).Int("txno", result.work.idx).
 					Msg("verifing tx failed")
 				failed = true
+			} else {
+				sv.hitMempool++
 			}
 
 			if doneCnt == txLen {
@@ -130,7 +159,7 @@ LOOP:
 		}
 	}
 
-	logger.Debug().Msg("verify tx done")
+	logger.Debug().Int("mempool", sv.hitMempool).Msg("verify tx done")
 	return failed, errors
 }
 
@@ -139,14 +168,19 @@ func (bv *SignVerifier) verifyTxsInplace(txlist *types.TxList) (bool, []error) {
 	txLen := len(txs)
 	errors := make([]error, txLen, txLen)
 	failed := false
+	var hit bool
 
 	logger.Debug().Int("txlen", txLen).Msg("verify tx inplace start")
 
 	for i, tx := range txs {
-		errors[i] = verifyTx(tx)
+		hit, errors[i] = bv.verifyTx(bv.comm, tx)
 		failed = true
+
+		if hit {
+			bv.hitMempool++
+		}
 	}
 
-	logger.Debug().Msg("verify tx done")
+	logger.Debug().Int("mempool", bv.hitMempool).Msg("verify tx inplace done")
 	return failed, errors
 }

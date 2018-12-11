@@ -8,6 +8,7 @@ package chain
 import (
 	"bytes"
 	"errors"
+	"github.com/aergoio/aergo/pkg/component"
 
 	"github.com/aergoio/aergo/internal/enc"
 	"github.com/aergoio/aergo/state"
@@ -25,9 +26,9 @@ var (
 	ErrorBlockVerifyStateRoot = errors.New("Block verify failed, because state root hash is not equal")
 )
 
-func NewBlockValidator(sdb *state.ChainStateDB) *BlockValidator {
+func NewBlockValidator(comm component.IComponentRequester, sdb *state.ChainStateDB) *BlockValidator {
 	bv := BlockValidator{
-		signVerifier: NewSignVerifier(VerifierCount),
+		signVerifier: NewSignVerifier(comm, VerifierCount, dfltUseMempool),
 		sdb:          sdb,
 	}
 
